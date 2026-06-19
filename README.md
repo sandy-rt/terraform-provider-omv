@@ -1,9 +1,34 @@
 # Terraform Provider for OpenMediaVault
 
+[![Terraform Registry](https://img.shields.io/badge/registry-sandy--rt%2Fomv-7B42BC?logo=terraform)](https://registry.terraform.io/providers/sandy-rt/omv/latest)
+[![Release](https://img.shields.io/github/v/release/sandy-rt/terraform-provider-omv?sort=semver)](https://github.com/sandy-rt/terraform-provider-omv/releases)
+[![CI](https://github.com/sandy-rt/terraform-provider-omv/actions/workflows/test.yml/badge.svg)](https://github.com/sandy-rt/terraform-provider-omv/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A Terraform provider to manage [OpenMediaVault](https://www.openmediavault.org/)
 shared folders and NFS exports declaratively, via OMV's JSON-RPC API.
 
+📦 **Published on the Terraform Registry:**
+[`sandy-rt/omv`](https://registry.terraform.io/providers/sandy-rt/omv/latest)
+
 > Tested against OpenMediaVault 7 (Sandworm).
+
+## Install
+
+No manual build required — Terraform fetches it from the registry:
+
+```hcl
+terraform {
+  required_providers {
+    omv = {
+      source  = "sandy-rt/omv"
+      version = "~> 0.1"
+    }
+  }
+}
+```
+
+Then run `terraform init`.
 
 ## Features
 

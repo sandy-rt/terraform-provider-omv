@@ -1,0 +1,90 @@
+# Continuous integration: build, vet, format, test, and docs freshness.
+# Runs on every push to main and on pull requests.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build & test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Verify gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-compliant:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Test
+        run: go test -v -cover ./...
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+        # Advisory: surfaces lint suggestions without blocking the pipeline.
+        continue-on-error: true
+
+  docs:
+    name: docs up to date
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Regenerate docs and check for drift
+        run: |
+          go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@v0.25.0
+          tfplugindocs generate --provider-name omv
+          if ! git diff --quiet -- docs/; then
+            echo "Docs are out of date. Run: tfplugindocs generate --provider-name omv"
+            git diff -- docs/
+            exit 1
+          fi
