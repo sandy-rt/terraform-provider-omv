@@ -34,6 +34,7 @@ resource "omv_shared_folder" "example" {
 ### Optional
 
 - `comment` (String) Comment. Defaults to the name.
+- `recursive` (Boolean) On destroy, whether to also delete the folder's contents on disk. Default false (removes the share but keeps the data).
 - `reldirpath` (String) Relative directory path. Defaults to <name>/.
 
 ### Read-Only

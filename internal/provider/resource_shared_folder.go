@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -31,6 +32,7 @@ type sharedFolderModel struct {
 	MntEntRef  types.String `tfsdk:"mntentref"`
 	RelDirPath types.String `tfsdk:"reldirpath"`
 	MountPoint types.String `tfsdk:"mountpoint"`
+	Recursive  types.Bool   `tfsdk:"recursive"`
 }
 
 // omvSharedFolder mirrors ShareMgmt.get / ShareMgmt.set response fields.
@@ -82,6 +84,13 @@ func (r *sharedFolderResource) Schema(_ context.Context, _ resource.SchemaReques
 				Computed:      true,
 				Description:   "Absolute mountpoint of the filesystem.",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"recursive": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Default:  booldefault.StaticBool(false),
+				Description: "On destroy, whether to also delete the folder's contents on disk. " +
+					"Default false (removes the share but keeps the data).",
 			},
 		},
 	}
@@ -205,7 +214,10 @@ func (r *sharedFolderResource) Delete(ctx context.Context, req resource.DeleteRe
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if _, err := r.data.client.Call("ShareMgmt", "delete", map[string]interface{}{"uuid": state.UUID.ValueString()}); err != nil {
+	if _, err := r.data.client.Call("ShareMgmt", "delete", map[string]interface{}{
+		"uuid":      state.UUID.ValueString(),
+		"recursive": state.Recursive.ValueBool(),
+	}); err != nil {
 		resp.Diagnostics.AddError("Failed to delete shared folder", err.Error())
 		return
 	}
