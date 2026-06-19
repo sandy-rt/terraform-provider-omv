@@ -19,6 +19,11 @@ import (
 // NewObjectUUID is OMV's sentinel UUID meaning "this is a new object" on create.
 const NewObjectUUID = "fa4b1c66-ef79-11e5-87a0-0002b3a176b4"
 
+// UndefinedUUID is OMV's "empty reference" UUID. Some RPCs require a uuidv4
+// reference field to be present even when the server computes the real value
+// itself (e.g. NFS.setShare's mntentref on create, which OMV overwrites).
+const UndefinedUUID = "00000000-0000-0000-0000-000000000000"
+
 type Client struct {
 	Endpoint string
 	http     *http.Client
@@ -87,16 +92,21 @@ func (c *Client) Call(service, method string, params interface{}) (json.RawMessa
 	return rr.Response, nil
 }
 
-// ApplyChanges activates all staged configuration changes.
+// ApplyChangesAndWait activates staged configuration changes and blocks until
+// the OMV background job finishes (or the timeout elapses).
 //
-// The synchronous Config.applyChanges call can exceed the OMV nginx proxy
-// timeout (it regenerates configs and restarts services). So we use the
-// background variant the web UI uses — Config.applyChangesBg returns a status
-// file we poll via Exec.isRunning until the job finishes.
-func (c *Client) ApplyChanges() error {
+// IMPORTANT OMV behaviour: applying changes can take a very long time (minutes
+// to ~1 hour on low-powered hardware), and if the background job is interrupted
+// OMV reverts the staged changes. So this must wait for completion and must not
+// give up prematurely. The synchronous Config.applyChanges would also exceed
+// the nginx proxy timeout, hence the background variant + polling.
+//
+// force=false: only deploy modules that actually have pending changes, so a
+// call with nothing dirty returns quickly instead of redeploying everything.
+func (c *Client) ApplyChangesAndWait(timeout, pollInterval time.Duration) error {
 	raw, err := c.Call("Config", "applyChangesBg", map[string]interface{}{
 		"modules": []string{},
-		"force":   true,
+		"force":   false,
 	})
 	if err != nil {
 		return err
@@ -107,20 +117,27 @@ func (c *Client) ApplyChanges() error {
 		return nil
 	}
 
-	deadline := time.Now().Add(5 * time.Minute)
+	deadline := time.Now().Add(timeout)
+	consecErrors := 0
 	for time.Now().Before(deadline) {
 		running, err := c.execIsRunning(filename)
 		if err != nil {
-			// Transient error while the box is busy applying; back off and retry.
-			time.Sleep(3 * time.Second)
+			// Tolerate transient errors while the box is busy, but don't loop
+			// forever on a persistent failure.
+			consecErrors++
+			if consecErrors >= 12 {
+				return fmt.Errorf("applyChanges: repeated status-check failures for job %s: %w", filename, err)
+			}
+			time.Sleep(pollInterval)
 			continue
 		}
+		consecErrors = 0
 		if !running {
 			return nil
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(pollInterval)
 	}
-	return fmt.Errorf("applyChanges: background job %s did not finish within timeout", filename)
+	return fmt.Errorf("applyChanges: background job %s did not finish within %s", filename, timeout)
 }
 
 // execIsRunning reports whether a background job is still running. OMV has

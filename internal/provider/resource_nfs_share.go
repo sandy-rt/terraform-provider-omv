@@ -28,6 +28,7 @@ type nfsShareResource struct {
 type nfsShareModel struct {
 	UUID            types.String `tfsdk:"uuid"`
 	SharedFolderRef types.String `tfsdk:"sharedfolderref"`
+	MntEntRef       types.String `tfsdk:"mntentref"`
 	Client          types.String `tfsdk:"client"`
 	Options         types.String `tfsdk:"options"`
 	ExtraOptions    types.String `tfsdk:"extraoptions"`
@@ -38,6 +39,7 @@ type nfsShareModel struct {
 type omvNFSShare struct {
 	UUID            string `json:"uuid"`
 	SharedFolderRef string `json:"sharedfolderref"`
+	MntEntRef       string `json:"mntentref"`
 	Client          string `json:"client"`
 	Options         string `json:"options"`
 	ExtraOptions    string `json:"extraoptions"`
@@ -62,6 +64,11 @@ func (r *nfsShareResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			"sharedfolderref": schema.StringAttribute{
 				Required:    true,
 				Description: "UUID of the shared folder to export (typically omv_shared_folder.x.uuid).",
+			},
+			"mntentref": schema.StringAttribute{
+				Computed:      true,
+				Description:   "Mount entry reference for the export bind-mount. Managed by OMV.",
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"client": schema.StringAttribute{
 				Optional:    true,
@@ -108,20 +115,20 @@ func (r *nfsShareResource) Create(ctx context.Context, req resource.CreateReques
 	params := map[string]interface{}{
 		"uuid":            client.NewObjectUUID,
 		"sharedfolderref": plan.SharedFolderRef.ValueString(),
-		"client":          plan.Client.ValueString(),
-		"options":         plan.Options.ValueString(),
-		"extraoptions":    plan.ExtraOptions.ValueString(),
-		"comment":         plan.Comment.ValueString(),
+		// Required by the schema but overwritten by OMV on create: the server
+		// creates the export bind-mount and sets the real mntentref itself.
+		"mntentref":    client.UndefinedUUID,
+		"client":       plan.Client.ValueString(),
+		"options":      plan.Options.ValueString(),
+		"extraoptions": plan.ExtraOptions.ValueString(),
+		"comment":      plan.Comment.ValueString(),
 	}
 	raw, err := r.data.client.Call("NFS", "setShare", params)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to create NFS export", err.Error())
 		return
 	}
-	if err := r.data.client.ApplyChanges(); err != nil {
-		resp.Diagnostics.AddError("Failed to apply changes after create", err.Error())
-		return
-	}
+	// Changes are only staged here; deployment happens via the omv_apply resource.
 
 	var share omvNFSShare
 	if err := json.Unmarshal(raw, &share); err != nil || share.UUID == "" {
@@ -163,19 +170,18 @@ func (r *nfsShareResource) Update(ctx context.Context, req resource.UpdateReques
 	params := map[string]interface{}{
 		"uuid":            state.UUID.ValueString(),
 		"sharedfolderref": plan.SharedFolderRef.ValueString(),
-		"client":          plan.Client.ValueString(),
-		"options":         plan.Options.ValueString(),
-		"extraoptions":    plan.ExtraOptions.ValueString(),
-		"comment":         plan.Comment.ValueString(),
+		// On update OMV keeps the supplied mntentref, so pass the existing one.
+		"mntentref":    state.MntEntRef.ValueString(),
+		"client":       plan.Client.ValueString(),
+		"options":      plan.Options.ValueString(),
+		"extraoptions": plan.ExtraOptions.ValueString(),
+		"comment":      plan.Comment.ValueString(),
 	}
 	if _, err := r.data.client.Call("NFS", "setShare", params); err != nil {
 		resp.Diagnostics.AddError("Failed to update NFS export", err.Error())
 		return
 	}
-	if err := r.data.client.ApplyChanges(); err != nil {
-		resp.Diagnostics.AddError("Failed to apply changes after update", err.Error())
-		return
-	}
+	// Staged only; deployment happens via the omv_apply resource.
 	r.readInto(ctx, state.UUID.ValueString(), &plan, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
@@ -201,10 +207,7 @@ func (r *nfsShareResource) Delete(ctx context.Context, req resource.DeleteReques
 		resp.Diagnostics.AddError("Failed to delete NFS export", err.Error())
 		return
 	}
-	if err := r.data.client.ApplyChanges(); err != nil {
-		resp.Diagnostics.AddError("Failed to apply changes after delete", err.Error())
-		return
-	}
+	// Staged only; deployment happens via the omv_apply resource.
 }
 
 func (r *nfsShareResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
@@ -223,6 +226,7 @@ func (r *nfsShareResource) readInto(_ context.Context, uuid string, model *nfsSh
 	}
 	model.UUID = types.StringValue(share.UUID)
 	model.SharedFolderRef = types.StringValue(share.SharedFolderRef)
+	model.MntEntRef = types.StringValue(share.MntEntRef)
 	model.Client = types.StringValue(share.Client)
 	model.Options = types.StringValue(share.Options)
 	model.ExtraOptions = types.StringValue(share.ExtraOptions)

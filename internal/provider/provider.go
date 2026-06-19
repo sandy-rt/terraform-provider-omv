@@ -105,6 +105,7 @@ func (p *omvProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewSharedFolderResource,
 		NewNFSShareResource,
+		NewApplyResource,
 	}
 }
 

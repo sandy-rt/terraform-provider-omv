@@ -37,7 +37,20 @@ Then run `terraform init`.
 - `omv_filesystems` (data source) — discover filesystems for `mntentref`
 - **Destroy safety guard** — `allow_destroy = false` (default) makes the provider
   refuse to delete shares, even on `terraform destroy`
-- Handles OMV's slow apply by using the background apply + poll mechanism
+- Single `omv_apply` resource to deploy all staged changes once (OMV applies can
+  take a long time and are rolled back if interrupted)
+
+## How applies work
+
+OMV separates *staging* config changes from *deploying* them. The
+`omv_shared_folder` and `omv_nfs_share` resources only **stage** changes (fast).
+Deployment happens when `Config.applyChanges` runs, which can take minutes to
+~1 hour on low-powered hardware — and if interrupted, OMV reverts the staged
+changes.
+
+So this provider does **not** apply after every resource. Instead you declare a
+single `omv_apply` resource that depends on your shares (via `triggers`) and runs
+the deployment once, at the end of the run, waiting for it to finish.
 
 ## Usage
 
@@ -72,10 +85,21 @@ resource "omv_nfs_share" "app" {
   extraoptions    = "insecure,no_root_squash,subtree_check,sync"
   comment         = "app data"
 }
+
+# Deploys everything once, after the shares are staged. Re-runs whenever a
+# referenced resource changes.
+resource "omv_apply" "this" {
+  triggers = {
+    app_folder = sha1(jsonencode(omv_shared_folder.app))
+    app_nfs    = sha1(jsonencode(omv_nfs_share.app))
+  }
+  timeout_minutes = 90
+}
 ```
 
 The `sharedfolderref` reference makes Terraform always create the shared folder
-before the NFS export that uses it.
+before the NFS export that uses it, and the `triggers` references make
+`omv_apply` run after both.
 
 ## Provider configuration
 

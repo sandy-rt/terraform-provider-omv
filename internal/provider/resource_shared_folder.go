@@ -123,10 +123,7 @@ func (r *sharedFolderResource) Create(ctx context.Context, req resource.CreateRe
 		resp.Diagnostics.AddError("Failed to create shared folder", err.Error())
 		return
 	}
-	if err := r.data.client.ApplyChanges(); err != nil {
-		resp.Diagnostics.AddError("Failed to apply changes after create", err.Error())
-		return
-	}
+	// Changes are only staged here; deployment happens via the omv_apply resource.
 
 	var folder omvSharedFolder
 	if err := json.Unmarshal(raw, &folder); err != nil || folder.UUID == "" {
@@ -186,10 +183,7 @@ func (r *sharedFolderResource) Update(ctx context.Context, req resource.UpdateRe
 		resp.Diagnostics.AddError("Failed to update shared folder", err.Error())
 		return
 	}
-	if err := r.data.client.ApplyChanges(); err != nil {
-		resp.Diagnostics.AddError("Failed to apply changes after update", err.Error())
-		return
-	}
+	// Staged only; deployment happens via the omv_apply resource.
 	r.readInto(ctx, state.UUID.ValueString(), &plan, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
@@ -215,10 +209,7 @@ func (r *sharedFolderResource) Delete(ctx context.Context, req resource.DeleteRe
 		resp.Diagnostics.AddError("Failed to delete shared folder", err.Error())
 		return
 	}
-	if err := r.data.client.ApplyChanges(); err != nil {
-		resp.Diagnostics.AddError("Failed to apply changes after delete", err.Error())
-		return
-	}
+	// Staged only; deployment happens via the omv_apply resource.
 }
 
 func (r *sharedFolderResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {

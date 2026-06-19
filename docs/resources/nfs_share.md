@@ -46,6 +46,7 @@ resource "omv_nfs_share" "example" {
 
 ### Read-Only
 
+- `mntentref` (String) Mount entry reference for the export bind-mount. Managed by OMV.
 - `uuid` (String) OMV-assigned NFS export UUID.
 
 ## Import
