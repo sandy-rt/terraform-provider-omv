@@ -1,0 +1,18 @@
+# Built provider binary
+terraform-provider-omv
+terraform-provider-omv_v*
+
+# GoReleaser output
+dist/
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
