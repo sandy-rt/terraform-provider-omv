@@ -128,7 +128,10 @@ func (r *nfsShareResource) Create(ctx context.Context, req resource.CreateReques
 		resp.Diagnostics.AddError("Failed to create NFS export", err.Error())
 		return
 	}
-	// Changes are only staged here; deployment happens via the omv_apply resource.
+	if err := r.data.deploy(); err != nil {
+		resp.Diagnostics.AddError("Failed to apply changes after creating NFS export", err.Error())
+		return
+	}
 
 	var share omvNFSShare
 	if err := json.Unmarshal(raw, &share); err != nil || share.UUID == "" {
@@ -181,7 +184,10 @@ func (r *nfsShareResource) Update(ctx context.Context, req resource.UpdateReques
 		resp.Diagnostics.AddError("Failed to update NFS export", err.Error())
 		return
 	}
-	// Staged only; deployment happens via the omv_apply resource.
+	if err := r.data.deploy(); err != nil {
+		resp.Diagnostics.AddError("Failed to apply changes after updating NFS export", err.Error())
+		return
+	}
 	r.readInto(ctx, state.UUID.ValueString(), &plan, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
@@ -207,7 +213,10 @@ func (r *nfsShareResource) Delete(ctx context.Context, req resource.DeleteReques
 		resp.Diagnostics.AddError("Failed to delete NFS export", err.Error())
 		return
 	}
-	// Staged only; deployment happens via the omv_apply resource.
+	if err := r.data.deploy(); err != nil {
+		resp.Diagnostics.AddError("Failed to apply changes after deleting NFS export", err.Error())
+		return
+	}
 }
 
 func (r *nfsShareResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {

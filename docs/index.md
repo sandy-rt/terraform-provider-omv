@@ -44,6 +44,7 @@ variable "omv_password" {
 ### Optional
 
 - `allow_destroy` (Boolean) Safety switch. When false (default), the provider REFUSES to delete shared folders or NFS exports, even on terraform destroy. Set true only when you intend to remove shares.
+- `apply_timeout_minutes` (Number) Max minutes to wait for each OMV applyChanges to finish. OMV applies can be slow on low-powered hardware. Falls back to OMV_APPLY_TIMEOUT_MINUTES, then defaults to 120.
 - `endpoint` (String) OMV base URL, e.g. http://omv.example.com. Falls back to OMV_ENDPOINT.
 - `password` (String, Sensitive) OMV admin password. Falls back to OMV_PASSWORD.
 - `username` (String) OMV admin username. Falls back to OMV_USERNAME.

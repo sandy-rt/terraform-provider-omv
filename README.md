@@ -35,22 +35,28 @@ Then run `terraform init`.
 - `omv_shared_folder` — manage shared folders (create/read/update/delete/import)
 - `omv_nfs_share` — manage NFS exports
 - `omv_filesystems` (data source) — discover filesystems for `mntentref`
+- **Automatic deploy** — changes are deployed (`Config.applyChanges`) and waited
+  on automatically as part of `terraform apply` *and* `terraform destroy`. No
+  extra resource or wrapper needed.
 - **Destroy safety guard** — `allow_destroy = false` (default) makes the provider
   refuse to delete shares, even on `terraform destroy`
-- Single `omv_apply` resource to deploy all staged changes once (OMV applies can
-  take a long time and are rolled back if interrupted)
 
 ## How applies work
 
-OMV separates *staging* config changes from *deploying* them. The
-`omv_shared_folder` and `omv_nfs_share` resources only **stage** changes (fast).
-Deployment happens when `Config.applyChanges` runs, which can take minutes to
-~1 hour on low-powered hardware — and if interrupted, OMV reverts the staged
-changes.
+OMV separates *staging* config changes from *deploying* them. After staging a
+change, this provider calls `Config.applyChanges` and **waits for it to finish**
+— so `terraform apply`/`destroy` leave the NAS fully deployed, with no pending
+"apply changes" banner.
 
-So this provider does **not** apply after every resource. Instead you declare a
-single `omv_apply` resource that depends on your shares (via `triggers`) and runs
-the deployment once, at the end of the run, waiting for it to finish.
+Notes:
+- OMV applies can take minutes (longer on low-powered hardware). Terraform shows
+  `Still creating... [Ns elapsed]` while it waits. Tune the max wait with
+  `apply_timeout_minutes` (default 120).
+- Deploys are **serialized** inside the provider, so parallel resource changes
+  don't trigger overlapping applies (which would cancel each other's restarts).
+- The session is **re-established automatically** if it expires mid-apply.
+- Each changed resource triggers a deploy, so a run that changes N resources
+  performs N (sequential) deploys.
 
 ## Usage
 
@@ -85,21 +91,10 @@ resource "omv_nfs_share" "app" {
   extraoptions    = "insecure,no_root_squash,subtree_check,sync"
   comment         = "app data"
 }
-
-# Deploys everything once, after the shares are staged. Re-runs whenever a
-# referenced resource changes.
-resource "omv_apply" "this" {
-  triggers = {
-    app_folder = sha1(jsonencode(omv_shared_folder.app))
-    app_nfs    = sha1(jsonencode(omv_nfs_share.app))
-  }
-  timeout_minutes = 90
-}
 ```
 
-The `sharedfolderref` reference makes Terraform always create the shared folder
-before the NFS export that uses it, and the `triggers` references make
-`omv_apply` run after both.
+That's it — `terraform apply` creates and **deploys** both. The `sharedfolderref`
+reference makes Terraform create the shared folder before the NFS export.
 
 ## Provider configuration
 
@@ -109,6 +104,7 @@ before the NFS export that uses it, and the `triggers` references make
 | `username` | `OMV_USERNAME` | yes | OMV admin username |
 | `password` | `OMV_PASSWORD` | yes | OMV admin password (sensitive) |
 | `allow_destroy` | — | no | Default `false`. Must be `true` to allow deletes. |
+| `apply_timeout_minutes` | `OMV_APPLY_TIMEOUT_MINUTES` | no | Max minutes to wait per deploy. Default `120`. |
 
 Credentials are never written to Terraform state.
 

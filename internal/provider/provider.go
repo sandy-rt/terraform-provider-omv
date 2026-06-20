@@ -3,6 +3,9 @@ package provider
 import (
 	"context"
 	"os"
+	"strconv"
+	"sync"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -16,6 +19,18 @@ import (
 type providerData struct {
 	client       *client.Client
 	allowDestroy bool
+	applyTimeout time.Duration
+	// applyMu serializes deploys so concurrent resource operations don't trigger
+	// overlapping OMV applyChanges (which cancel each other's service restarts).
+	applyMu *sync.Mutex
+}
+
+// deploy applies all staged OMV changes, serialized across resources, and waits
+// for completion. Call this at the end of every Create/Update/Delete.
+func (d *providerData) deploy() error {
+	d.applyMu.Lock()
+	defer d.applyMu.Unlock()
+	return d.client.ApplyChangesAndWait(d.applyTimeout, 10*time.Second)
 }
 
 type omvProvider struct {
@@ -23,10 +38,11 @@ type omvProvider struct {
 }
 
 type omvProviderModel struct {
-	Endpoint     types.String `tfsdk:"endpoint"`
-	Username     types.String `tfsdk:"username"`
-	Password     types.String `tfsdk:"password"`
-	AllowDestroy types.Bool   `tfsdk:"allow_destroy"`
+	Endpoint            types.String `tfsdk:"endpoint"`
+	Username            types.String `tfsdk:"username"`
+	Password            types.String `tfsdk:"password"`
+	AllowDestroy        types.Bool   `tfsdk:"allow_destroy"`
+	ApplyTimeoutMinutes types.Int64  `tfsdk:"apply_timeout_minutes"`
 }
 
 func New(version string) func() provider.Provider {
@@ -63,6 +79,12 @@ func (p *omvProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *
 					"delete shared folders or NFS exports, even on terraform destroy. " +
 					"Set true only when you intend to remove shares.",
 			},
+			"apply_timeout_minutes": schema.Int64Attribute{
+				Optional: true,
+				Description: "Max minutes to wait for each OMV applyChanges to finish. " +
+					"OMV applies can be slow on low-powered hardware. Falls back to " +
+					"OMV_APPLY_TIMEOUT_MINUTES, then defaults to 120.",
+			},
 		},
 	}
 }
@@ -96,7 +118,24 @@ func (p *omvProvider) Configure(ctx context.Context, req provider.ConfigureReque
 		return
 	}
 
-	pd := &providerData{client: c, allowDestroy: cfg.AllowDestroy.ValueBool()}
+	timeoutMin := cfg.ApplyTimeoutMinutes.ValueInt64()
+	if timeoutMin <= 0 {
+		if env := os.Getenv("OMV_APPLY_TIMEOUT_MINUTES"); env != "" {
+			if v, perr := strconv.Atoi(env); perr == nil {
+				timeoutMin = int64(v)
+			}
+		}
+	}
+	if timeoutMin <= 0 {
+		timeoutMin = 120
+	}
+
+	pd := &providerData{
+		client:       c,
+		allowDestroy: cfg.AllowDestroy.ValueBool(),
+		applyTimeout: time.Duration(timeoutMin) * time.Minute,
+		applyMu:      &sync.Mutex{},
+	}
 	resp.ResourceData = pd
 	resp.DataSourceData = pd
 }
@@ -105,7 +144,6 @@ func (p *omvProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewSharedFolderResource,
 		NewNFSShareResource,
-		NewApplyResource,
 	}
 }
 

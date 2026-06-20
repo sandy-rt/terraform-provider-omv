@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/cookiejar"
+	"strings"
 	"time"
 )
 
@@ -27,6 +28,8 @@ const UndefinedUUID = "00000000-0000-0000-0000-000000000000"
 type Client struct {
 	Endpoint string
 	http     *http.Client
+	username string
+	password string
 }
 
 type rpcRequest struct {
@@ -61,8 +64,12 @@ func New(endpoint string) (*Client, error) {
 	}, nil
 }
 
-// Login authenticates and stores the session cookie in the jar.
+// Login authenticates and stores the session cookie in the jar. The
+// credentials are retained so the client can transparently re-login if the
+// session expires during a long-running apply.
 func (c *Client) Login(username, password string) error {
+	c.username = username
+	c.password = password
 	_, err := c.Call("Session", "login", map[string]string{
 		"username": username,
 		"password": password,
@@ -118,26 +125,52 @@ func (c *Client) ApplyChangesAndWait(timeout, pollInterval time.Duration) error 
 	}
 
 	deadline := time.Now().Add(timeout)
-	consecErrors := 0
+	transientErrors := 0
 	for time.Now().Before(deadline) {
 		running, err := c.execIsRunning(filename)
 		if err != nil {
-			// Tolerate transient errors while the box is busy, but don't loop
-			// forever on a persistent failure.
-			consecErrors++
-			if consecErrors >= 12 {
-				return fmt.Errorf("applyChanges: repeated status-check failures for job %s: %w", filename, err)
+			msg := err.Error()
+			switch {
+			case isAuthError(msg):
+				// The session expired during a long apply: re-login and keep
+				// polling the same background job (which is still running).
+				_ = c.Login(c.username, c.password)
+				time.Sleep(pollInterval)
+				continue
+			case isTransient(msg):
+				transientErrors++
+				if transientErrors >= 12 {
+					return fmt.Errorf("applyChanges: repeated status-check failures for job %s: %w", filename, err)
+				}
+				time.Sleep(pollInterval)
+				continue
+			default:
+				// A failed background job surfaces its error (the apply log) here.
+				return fmt.Errorf("OMV apply failed: %s", msg)
 			}
-			time.Sleep(pollInterval)
-			continue
 		}
-		consecErrors = 0
+		transientErrors = 0
 		if !running {
 			return nil
 		}
 		time.Sleep(pollInterval)
 	}
 	return fmt.Errorf("applyChanges: background job %s did not finish within %s", filename, timeout)
+}
+
+func isAuthError(msg string) bool {
+	m := strings.ToLower(msg)
+	return strings.Contains(m, "session expired") ||
+		strings.Contains(m, "not authenticated") ||
+		strings.Contains(m, "authentication")
+}
+
+func isTransient(msg string) bool {
+	m := strings.ToLower(msg)
+	return strings.Contains(m, "request failed") || // transport error
+		strings.Contains(m, "decode failed") ||
+		strings.Contains(m, "timeout") ||
+		strings.Contains(m, "eof")
 }
 
 // execIsRunning reports whether a background job is still running. OMV has
